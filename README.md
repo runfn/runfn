@@ -1,5 +1,7 @@
 # runfn.dev
 
+test
+
 **runfn.dev is your platform for discovering, sharing, and deploying reusable serverless functions.**
 
 Effortlessly manage and scale your functions with seamless integration and zero friction.
