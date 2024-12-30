@@ -1,46 +1,61 @@
-import {
-    NextApiRequest,
-    //NextApiResponse
-} from "next";
-import { clerkClient, getAuth } from "@clerk/nextjs/server";
+import { Hono } from "hono";
+import { setSignedCookie } from "hono/cookie";
+import { cors } from "hono/cors";
+import { handle } from "hono/vercel";
 
-interface ExternalAccount {
-    provider: string;
-    id: string;
+export const runtime = "nodejs";
+
+const appId = process.env.GITHUB_APP_ID;
+const clientId = process.env.GITHUB_CLIENT_ID;
+const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+
+if (!appId || !clientId || !clientSecret) {
+	throw new Error("Missing GitHub app ID, client ID, or client secret");
 }
 
-export async function GET(
-    req: NextApiRequest,
-    //res: NextApiResponse
-) {
-    const { userId } = getAuth(req);
+// TODO: remove hardcoded
+const secret = "SCcUV0f2dKxs7qdzpv81a";
 
-    if (!userId) {
-        return Response.json({ error: "Unauthorized" })
-    }
+const app = new Hono().basePath("/v1");
 
-    try {
-        const clerk = await clerkClient()
-        const user = await clerk.users.getUser(userId);
+// TODO: whitelist
+app.use("/v1/*", cors());
 
-        console.log(user.externalAccounts)
+app.get("/auth/github/callback", async (c) => {
+	const { code } = c.req.query();
 
-        const githubAccount = user.externalAccounts.find(
-            (account) => account.provider === "oauth_github"
-        ) as ExternalAccount | undefined;
+	if (!code) {
+		throw new Error("Missing code");
+	}
 
-        console.log(githubAccount)
+	const response = await fetch(
+		`https://github.com/login/oauth/access_token?client_id=${clientId}&client_secret=${clientSecret}&code=${code}`,
+		{
+			method: "POST",
+		},
+	);
 
-        if (!githubAccount) {
-            return Response.json({ error: "GitHub account not connected" })
-        }
+	if (!response.ok) {
+		return c.json({ success: false });
+	}
 
-        return Response.json({
-            message: "GitHub account connected.",
-            accountId: githubAccount.id,
-        })
-    } catch (error) {
-        console.error("Error fetching GitHub account:", error);
-        return Response.json({ error: "Internal Server Error" })
-    }
-}
+	const data = await response.text();
+
+	const params = new URLSearchParams(data);
+	const token = params.get("access_token");
+
+	if (!token) {
+		return c.json({ data: null, error: "No access token returned" });
+	}
+
+	// TODO: add path, domain, maxAge, expires, sameSite
+	await setSignedCookie(c, "rnf_access_token", token, secret, {
+		secure: true,
+		httpOnly: true,
+	});
+
+	return c.json({ code });
+});
+
+export const GET = handle(app);
+export const POST = handle(app);
